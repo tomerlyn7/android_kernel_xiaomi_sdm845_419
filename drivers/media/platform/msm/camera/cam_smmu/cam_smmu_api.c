@@ -3231,52 +3231,6 @@ static int cam_alloc_smmu_context_banks(struct device *dev)
 	return 0;
 }
 
-static int cam_smmu_get_discard_memory_regions(struct device_node *of_node,
-	dma_addr_t *discard_iova_start, size_t *discard_iova_len)
-{
-	uint32_t discard_iova[2] = { 0 };
-	int num_values = 0;
-	int rc = 0;
-
-	if (!discard_iova_start || !discard_iova_len)
-		return -EINVAL;
-
-	*discard_iova_start = 0;
-	*discard_iova_len = 0;
-
-	num_values = of_property_count_u32_elems(of_node,
-		"iova-region-discard");
-	if (num_values <= 0) {
-		CAM_DBG(CAM_UTIL, "No discard region specified");
-		return 0;
-	} else if (num_values != 2) {
-		CAM_ERR(CAM_UTIL, "Invalid discard region specified %d",
-			num_values);
-		return -EINVAL;
-	}
-
-	rc = of_property_read_u32_array(of_node,
-		"iova-region-discard",
-		discard_iova, num_values);
-	if (rc) {
-		CAM_ERR(CAM_UTIL, "Can not read discard region %d", num_values);
-		return rc;
-	} else if (!discard_iova[0] || !discard_iova[1]) {
-		CAM_ERR(CAM_UTIL,
-			"Incorrect Discard region specified [0x%x 0x%x]",
-			discard_iova[0], discard_iova[1]);
-		return -EINVAL;
-	}
-
-	CAM_DBG(CAM_UTIL, "Discard region [0x%x 0x%x]",
-		discard_iova[0], discard_iova[0] + discard_iova[1]);
-
-	*discard_iova_start = discard_iova[0];
-	*discard_iova_len = discard_iova[1];
-
-	return 0;
-}
-
 static int cam_smmu_get_memory_regions_info(struct device_node *of_node,
 	struct cam_context_bank_info *cb)
 {
@@ -3363,16 +3317,6 @@ static int cam_smmu_get_memory_regions_info(struct device_node *of_node,
 			cb->io_support = 1;
 			cb->io_info.iova_start = region_start;
 			cb->io_info.iova_len = region_len;
-			rc = cam_smmu_get_discard_memory_regions(child_node,
-				&cb->io_info.discard_iova_start,
-				&cb->io_info.discard_iova_len);
-			if (rc) {
-				CAM_ERR(CAM_SMMU,
-					"Invalid Discard region specified in IO region, rc=%d",
-					rc);
-				of_node_put(mem_map_node);
-				return -EINVAL;
-			}
 			break;
 		case CAM_SMMU_REGION_SECHEAP:
 			cb->secheap_support = 1;
@@ -3391,60 +3335,6 @@ static int cam_smmu_get_memory_regions_info(struct device_node *of_node,
 		CAM_DBG(CAM_SMMU, "region_len -> %X", region_len);
 		CAM_DBG(CAM_SMMU, "region_id -> %X", region_id);
 	}
-
-	if (cb->io_support) {
-		rc = cam_smmu_get_discard_memory_regions(of_node,
-			&cb->discard_iova_start,
-			&cb->discard_iova_len);
-		if (rc) {
-			CAM_ERR(CAM_SMMU,
-				"Invalid Discard region specified in CB, rc=%d",
-				rc);
-			of_node_put(mem_map_node);
-			return -EINVAL;
-		}
-
-		/* Make sure Discard region is properly specified */
-		if ((cb->discard_iova_start !=
-			cb->io_info.discard_iova_start) ||
-			(cb->discard_iova_len !=
-			cb->io_info.discard_iova_len)) {
-			CAM_ERR(CAM_SMMU,
-				"Mismatch Discard region specified, [0x%x 0x%x] [0x%x 0x%x]",
-				cb->discard_iova_start,
-				cb->discard_iova_len,
-				cb->io_info.discard_iova_start,
-				cb->io_info.discard_iova_len);
-			of_node_put(mem_map_node);
-			return -EINVAL;
-		} else if (cb->discard_iova_start && cb->discard_iova_len) {
-			if ((cb->discard_iova_start <=
-			cb->io_info.iova_start) ||
-			(cb->discard_iova_start >=
-			cb->io_info.iova_start + cb->io_info.iova_len) ||
-			(cb->discard_iova_start + cb->discard_iova_len >=
-			cb->io_info.iova_start + cb->io_info.iova_len)) {
-				CAM_ERR(CAM_SMMU,
-				"[%s] : Incorrect Discard region specified [0x%x 0x%x] in [0x%x 0x%x]",
-				cb->name,
-				cb->discard_iova_start,
-				cb->discard_iova_start + cb->discard_iova_len,
-				cb->io_info.iova_start,
-				cb->io_info.iova_start + cb->io_info.iova_len);
-				of_node_put(mem_map_node);
-				return -EINVAL;
-			}
-
-			CAM_INFO(CAM_SMMU,
-				"[%s] : Discard region specified [0x%x 0x%x] in [0x%x 0x%x]",
-				cb->name,
-				cb->discard_iova_start,
-				cb->discard_iova_start + cb->discard_iova_len,
-				cb->io_info.iova_start,
-				cb->io_info.iova_start + cb->io_info.iova_len);
-		}
-	}
-
 	of_node_put(mem_map_node);
 
 	if (!num_regions) {
